@@ -36,7 +36,6 @@ func main() {
 		log.Fatalf("Error logging in to lastfm: %s\n", err)
 	}
 
-	_ = lastFM
 	fmt.Println("logged in")
 
 	plexConn, err := plex.New(serverURL, plexToken)
@@ -77,10 +76,14 @@ func main() {
 
 		// only scrobble if track is longer than 30 seconds and the track has been played for at least half its duration, or for 4 minutes (whichever occurs earlier.)
 		if durationSeconds > 30 && (float64(currentSeconds) >= float64(durationSeconds)*0.5 || currentSeconds >= 4*60) && lastScrobbled == "" {
-			lastFM.Scrobble(m.ParentTitle, m.GrandparentTitle, m.Title, durationSeconds, int(m.Index), started)
+			err = lastFM.Scrobble(m.ParentTitle, m.GrandparentTitle, m.Title, durationSeconds, int(m.Index), started)
+
+			if err != nil {
+				log.Printf("Error scrobbling: %s\n", err)
+			}
+
 			lastScrobbled = n.PlaySessionStateNotification[0].RatingKey
-		} else {
-			fmt.Printf("not scrobbling: currentseconds %d, duration/2 %.02f\n", currentSeconds, float64(durationSeconds)/2)
+			log.Printf("Scrobbled %s - %s\n", m.Title, m.ParentTitle)
 		}
 
 		// fmt.Printf("Title: %s\nArtist: %s\nAlbum: %s\nEvent: %s\n", m.Title, m.GrandparentTitle, m.ParentTitle, n.PlaySessionStateNotification[0].State)
@@ -91,7 +94,7 @@ func main() {
 		}
 	})
 
-	plexConn.SubscribeToNotifications(events, exit, nil)
+	plexConn.SubscribeToNotifications(events, exit, func(err error) {})
 
 	select {}
 }
