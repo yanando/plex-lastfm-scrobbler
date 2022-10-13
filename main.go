@@ -5,6 +5,7 @@ import (
 	"log"
 	"math"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/jrudio/go-plex-client"
@@ -96,7 +97,7 @@ func main() {
 		scrobble := &lastfm.Scrobble{
 			Album:      m.ParentTitle,
 			Artist:     m.GrandparentTitle,
-			Track:      m.Title,
+			Track:      strings.ReplaceAll(m.Title, "’", "'"), // replace all ’ with ' to prevent scrobbling the wrong track
 			Duration:   durationSeconds,
 			TrackIndex: int(m.Index),
 			StartTime:  started,
