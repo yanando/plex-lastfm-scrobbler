@@ -20,11 +20,11 @@ func main() {
 	var lastFMUser string
 	var plexMusicLibrary string
 	var verbose bool
-	flag.StringVar(&serverURL, "s", "http://localhost:32400", "Plex server url (defaults to http://localhost:32400")
+	flag.StringVar(&serverURL, "s", "http://localhost:32400", "Plex server url")
 	flag.StringVar(&plexToken, "t", "", "Plex token")
 	// flag.StringVar(&plexUser, "pu", "", "Plex user to scrobble from, scrobbles from all users by default")
 	flag.StringVar(&lastFMUser, "lu", "", "LastFM user to scrobble from, not required if only 1 user is logged in")
-	flag.StringVar(&plexMusicLibrary, "m", "Music", "Title of the plex music library (defaults to Music)")
+	flag.StringVar(&plexMusicLibrary, "m", "Music", "Title of the plex music library")
 	flag.BoolVar(&verbose, "v", false, "enable verbose logging")
 
 	flag.Parse()
