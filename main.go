@@ -86,7 +86,7 @@ func main() {
 					logger.LogError("Error scrobbling track: %s", err)
 				}
 
-				logger.LogInfo("%s Scrobbled %s - %s", lastFM.Username, cachedScrobble.Track, cachedScrobble.Album)
+				logger.LogInfo("%s scrobbled %s - %s", lastFM.Username, cachedScrobble.Track, cachedScrobble.Album)
 				cachedScrobble = nil
 			}
 		}
