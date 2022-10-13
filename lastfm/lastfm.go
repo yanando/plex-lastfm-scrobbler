@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log"
 	"net/http"
 	"net/url"
 	"os"
@@ -14,6 +13,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/yanando/lastfm_scrobbler/logger"
 )
 
 var (
@@ -21,58 +22,31 @@ var (
 	SharedSecret = "2a09de6493dbf45eb11f0db2c7c97848"
 )
 
-type LastFM struct {
+type Scrobble struct {
+	Album      string
+	Artist     string
+	Track      string
+	Duration   int
+	TrackIndex int
+	StartTime  time.Time
+}
+
+type lastFM struct {
 	SessionToken string
+	Username     string
 }
 
 // Nowplaying, duration in seconds
-func (lfm *LastFM) NowPlaying(album, artist, title string, duration, trackIndex int) error {
+func (lfm *lastFM) NowPlaying(scrobble *Scrobble) error {
 	params := map[string]string{
-		"album":       album,
-		"artist":      artist,
+		"album":       scrobble.Album,
+		"artist":      scrobble.Artist,
 		"api_key":     ApiKey,
 		"method":      "track.updateNowPlaying",
-		"duration":    strconv.Itoa(duration),
+		"duration":    strconv.Itoa(scrobble.Duration),
 		"sk":          lfm.SessionToken,
-		"track":       title,
-		"trackNumber": strconv.Itoa(trackIndex),
-	}
-
-	form := url.Values{}
-	for k, v := range params {
-		form.Add(k, v)
-	}
-	form.Add("api_sig", lfm.getSig(params))
-	form.Add("format", "json")
-
-	resp, err := http.PostForm("http://ws.audioscrobbler.com/2.0/", form)
-
-	if err != nil {
-		return err
-	}
-
-	// read response to clear up socket for reuse
-	_, err = io.ReadAll(resp.Body)
-
-	if err != nil {
-		return err
-	}
-
-	return nil
-}
-
-func (lfm *LastFM) Scrobble(album, artist, title string, duration, trackIndex int, started time.Time) error {
-	params := map[string]string{
-		"album": album,
-
-		"artist":      artist,
-		"api_key":     ApiKey,
-		"method":      "track.scrobble",
-		"duration":    strconv.Itoa(duration),
-		"sk":          lfm.SessionToken,
-		"track":       title,
-		"trackNumber": strconv.Itoa(trackIndex),
-		"timestamp":   strconv.FormatInt(started.Unix(), 10),
+		"track":       scrobble.Track,
+		"trackNumber": strconv.Itoa(scrobble.TrackIndex),
 	}
 
 	form := url.Values{}
@@ -95,12 +69,50 @@ func (lfm *LastFM) Scrobble(album, artist, title string, duration, trackIndex in
 		return err
 	}
 
-	fmt.Println(string(bodyBytes))
+	logger.LogDebug(string(bodyBytes))
 
 	return nil
 }
 
-func (lfm *LastFM) getSig(params map[string]string) string {
+func (lfm *lastFM) Scrobble(scrobble *Scrobble) error {
+	params := map[string]string{
+		"album":       scrobble.Album,
+		"artist":      scrobble.Artist,
+		"api_key":     ApiKey,
+		"method":      "track.scrobble",
+		"duration":    strconv.Itoa(scrobble.Duration),
+		"sk":          lfm.SessionToken,
+		"track":       scrobble.Track,
+		"trackNumber": strconv.Itoa(scrobble.TrackIndex),
+		"timestamp":   strconv.FormatInt(scrobble.StartTime.Unix(), 10),
+	}
+
+	form := url.Values{}
+	for k, v := range params {
+		form.Add(k, v)
+	}
+	form.Add("api_sig", lfm.getSig(params))
+	form.Add("format", "json")
+
+	resp, err := http.PostForm("http://ws.audioscrobbler.com/2.0/", form)
+
+	if err != nil {
+		return err
+	}
+
+	// read response to clear up socket for reuse
+	bodyBytes, err := io.ReadAll(resp.Body)
+
+	if err != nil {
+		return err
+	}
+
+	logger.LogDebug(string(bodyBytes))
+
+	return nil
+}
+
+func (lfm *lastFM) getSig(params map[string]string) string {
 	var keys []string
 	for k := range params {
 		keys = append(keys, k)
@@ -118,7 +130,7 @@ func (lfm *LastFM) getSig(params map[string]string) string {
 }
 
 // FromSessionFile returns returns a lastfm session, an empty lastFMName string implies that there's only one session file in
-func FromSessionFile(lastFMName string) (*LastFM, error) {
+func FromSessionFile(lastFMName string) (*lastFM, error) {
 	dir, err := os.ReadDir("./")
 
 	if err != nil {
@@ -133,7 +145,7 @@ func FromSessionFile(lastFMName string) (*LastFM, error) {
 				return nil, err
 			}
 
-			return &LastFM{SessionToken: string(data)}, nil
+			return &lastFM{SessionToken: string(data), Username: strings.Split(file.Name(), "_lastfm_session")[0]}, nil
 		}
 	}
 
@@ -141,8 +153,8 @@ func FromSessionFile(lastFMName string) (*LastFM, error) {
 	return Login()
 }
 
-func Login() (*LastFM, error) {
-	log.Println("Getting auth token")
+func Login() (*lastFM, error) {
+	logger.LogInfo("Getting auth token")
 	url := "https://ws.audioscrobbler.com/2.0/?method=auth.gettoken&api_key=" + ApiKey + "&format=json"
 
 	resp, err := http.Get(url)
@@ -177,12 +189,12 @@ func Login() (*LastFM, error) {
 
 	authToken := tokenResponse.Token
 
-	log.Println("Got auth token")
+	logger.LogInfo("Got auth token")
 
 	fmt.Printf("Please open https://www.last.fm/api/auth/?api_key=%s&token=%s in your browser and press enter after you're done", ApiKey, authToken)
 	fmt.Scanln()
 
-	log.Println("Fetching session")
+	logger.LogInfo("Fetching session")
 
 	sigString := fmt.Sprintf("api_key%smethodauth.getSessiontoken%s%s", ApiKey, authToken, SharedSecret)
 	apiSig := fmt.Sprintf("%x", md5.Sum([]byte(sigString)))
@@ -203,7 +215,7 @@ func Login() (*LastFM, error) {
 	}
 
 	if resp.StatusCode != 200 {
-		log.Println(string(bodyBytes))
+		logger.LogError(string(bodyBytes))
 		return nil, fmt.Errorf("login: unexpected statuscode %d", resp.StatusCode)
 	}
 
@@ -223,7 +235,7 @@ func Login() (*LastFM, error) {
 		return nil, err
 	}
 
-	log.Println("Got session")
+	logger.LogInfo("Got session")
 
 	err = os.WriteFile(webSessionResponse.Session.Name+"_lastfm_session", []byte(webSessionResponse.Session.Key), 0655)
 
@@ -231,5 +243,5 @@ func Login() (*LastFM, error) {
 		return nil, err
 	}
 
-	return &LastFM{SessionToken: webSessionResponse.Session.Key}, nil
+	return &lastFM{SessionToken: webSessionResponse.Session.Key, Username: webSessionResponse.Session.Name}, nil
 }

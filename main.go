@@ -10,21 +10,26 @@ import (
 
 	"github.com/jrudio/go-plex-client"
 	"github.com/yanando/lastfm_scrobbler/lastfm"
+	"github.com/yanando/lastfm_scrobbler/logger"
 )
 
 func main() {
 	var serverURL string
 	var plexToken string
-	var plexUser string
+	// var plexUser string
 	var lastFMUser string
 	var plexMusicLibrary string
+	var verbose bool
 	flag.StringVar(&serverURL, "s", "http://localhost:32400", "Plex server url (defaults to http://localhost:32400")
 	flag.StringVar(&plexToken, "t", "", "Plex token")
-	flag.StringVar(&plexUser, "pu", "", "Plex user to scrobble from, scrobbles from all users by default")
+	// flag.StringVar(&plexUser, "pu", "", "Plex user to scrobble from, scrobbles from all users by default")
 	flag.StringVar(&lastFMUser, "lu", "", "LastFM user to scrobble from, not required if only 1 user is logged in")
 	flag.StringVar(&plexMusicLibrary, "m", "Music", "Title of the plex music library (defaults to Music)")
+	flag.BoolVar(&verbose, "v", false, "enable verbose logging")
 
 	flag.Parse()
+
+	logger.Debug = verbose
 
 	if plexToken == "" {
 		log.Fatalln("Please supply a plex token")
@@ -41,7 +46,7 @@ func main() {
 	plexConn, err := plex.New(serverURL, plexToken)
 
 	if err != nil {
-		panic(err)
+		log.Fatalf("Error connecting to plex server: %s\n", err)
 	}
 
 	exit := make(chan os.Signal, 1)
@@ -49,48 +54,75 @@ func main() {
 	events := plex.NewNotificationEvents()
 
 	var lastScrobbled string
-	var started time.Time
+	var nowPlaying string
+	var started time.Time = time.Now()
+	var cachedScrobble *lastfm.Scrobble
 
 	events.OnPlaying(func(n plex.NotificationContainer) {
 		metadata, err := plexConn.GetMetadata(n.PlaySessionStateNotification[0].RatingKey)
 
 		if err != nil {
-			log.Printf("error getting metadata: %s\n", err)
+			logger.LogError("error getting metadata: %s", err)
 			return
 		}
 
 		m := metadata.MediaContainer.Metadata[0]
 
-		if m.LibrarySectionTitle != plexMusicLibrary || n.PlaySessionStateNotification[0].State != "playing" || n.Type != "playing" {
+		if m.LibrarySectionTitle != plexMusicLibrary ||
+			n.PlaySessionStateNotification[0].State != "playing" || n.Type != "playing" {
 			return
 		}
 
 		// reset last scrobbled, new track is being played
-		if n.PlaySessionStateNotification[0].ViewOffset == 0 {
+		if n.PlaySessionStateNotification[0].ViewOffset < 3000 && lastScrobbled != "" {
 			lastScrobbled = ""
+			nowPlaying = ""
 			started = time.Now()
+			logger.LogDebug("Restarted scrobble session")
+
+			if cachedScrobble != nil {
+				err = lastFM.Scrobble(cachedScrobble)
+
+				if err != nil {
+					logger.LogError("Error scrobbling track: %s", err)
+				}
+
+				logger.LogInfo("%s Scrobbled %s - %s", lastFM.Username, cachedScrobble.Track, cachedScrobble.Album)
+				cachedScrobble = nil
+			}
 		}
 
 		currentSeconds := int(math.Round(float64(n.PlaySessionStateNotification[0].ViewOffset) / 1000))
 		durationSeconds := int(math.Round(float64(m.Duration) / 1000))
 
-		// only scrobble if track is longer than 30 seconds and the track has been played for at least half its duration, or for 4 minutes (whichever occurs earlier.)
-		if durationSeconds > 30 && (float64(currentSeconds) >= float64(durationSeconds)*0.5 || currentSeconds >= 4*60) && lastScrobbled == "" {
-			err = lastFM.Scrobble(m.ParentTitle, m.GrandparentTitle, m.Title, durationSeconds, int(m.Index), started)
-
-			if err != nil {
-				log.Printf("Error scrobbling: %s\n", err)
-			}
-
-			lastScrobbled = n.PlaySessionStateNotification[0].RatingKey
-			log.Printf("Scrobbled %s - %s\n", m.Title, m.ParentTitle)
+		scrobble := &lastfm.Scrobble{
+			Album:      m.ParentTitle,
+			Artist:     m.GrandparentTitle,
+			Track:      m.Title,
+			Duration:   durationSeconds,
+			TrackIndex: int(m.Index),
+			StartTime:  started,
 		}
 
-		// fmt.Printf("Title: %s\nArtist: %s\nAlbum: %s\nEvent: %s\n", m.Title, m.GrandparentTitle, m.ParentTitle, n.PlaySessionStateNotification[0].State)
-		err = lastFM.NowPlaying(m.ParentTitle, m.GrandparentTitle, m.Title, durationSeconds, int(m.Index))
+		// only scrobble if track is longer than 30 seconds and the track has been played for at least half its duration,
+		// or for 4 minutes (whichever occurs earlier.). Cache scrobble and submit when next track is being played to prevent
+		// showing the scrobble entry next to the now playing entry
+		if durationSeconds > 30 &&
+			(float64(currentSeconds) >= float64(durationSeconds)*0.5 || currentSeconds >= 4*60) &&
+			lastScrobbled == "" {
+			cachedScrobble = scrobble
 
-		if err != nil {
-			log.Printf("error setting nowplaying on track: %s\n", err)
+			lastScrobbled = n.PlaySessionStateNotification[0].RatingKey
+			logger.LogDebug("Added %s - %s to scrobble cache, will be scrobbled once next track starts playing", scrobble.Track, scrobble.Album)
+		}
+
+		if nowPlaying == "" {
+			err = lastFM.NowPlaying(scrobble)
+
+			if err != nil {
+				logger.LogError("error setting nowplaying on track: %s", err)
+			}
+			nowPlaying = n.PlaySessionStateNotification[0].RatingKey
 		}
 	})
 
