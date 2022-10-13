@@ -123,7 +123,7 @@ func main() {
 			}
 			nowPlaying = n.PlaySessionStateNotification[0].RatingKey
 
-			logger.LogInfo("%s is now playing %s - %s", lastFM.Username, cachedScrobble.Track, cachedScrobble.Album)
+			logger.LogInfo("%s is now playing %s - %s", lastFM.Username, scrobble.Track, scrobble.Album)
 		}
 	})
 
