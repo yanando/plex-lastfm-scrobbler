@@ -2,7 +2,6 @@ package main
 
 import (
 	"flag"
-	"fmt"
 	"log"
 	"math"
 	"os"
@@ -41,7 +40,7 @@ func main() {
 		log.Fatalf("Error logging in to lastfm: %s\n", err)
 	}
 
-	fmt.Println("logged in")
+	logger.LogInfo("Logged in!")
 
 	plexConn, err := plex.New(serverURL, plexToken)
 
@@ -123,6 +122,8 @@ func main() {
 				logger.LogError("error setting nowplaying on track: %s", err)
 			}
 			nowPlaying = n.PlaySessionStateNotification[0].RatingKey
+
+			logger.LogInfo("%s is now playing %s - %s", lastFM.Username, cachedScrobble.Track, cachedScrobble.Album)
 		}
 	})
 
