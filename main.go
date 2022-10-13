@@ -75,7 +75,6 @@ func main() {
 		// reset last scrobbled, new track is being played
 		if n.PlaySessionStateNotification[0].ViewOffset < 3000 && lastScrobbled != "" {
 			lastScrobbled = ""
-			nowPlaying = ""
 			started = time.Now()
 			logger.LogDebug("Restarted scrobble session")
 
@@ -115,7 +114,7 @@ func main() {
 			logger.LogDebug("Added %s - %s to scrobble cache, will be scrobbled once next track starts playing", scrobble.Track, scrobble.Album)
 		}
 
-		if nowPlaying == "" {
+		if nowPlaying != n.PlaySessionStateNotification[0].RatingKey {
 			err = lastFM.NowPlaying(scrobble)
 
 			if err != nil {
