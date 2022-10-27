@@ -11,31 +11,53 @@ import (
 	"github.com/jrudio/go-plex-client"
 	"github.com/yanando/lastfm_scrobbler/lastfm"
 	"github.com/yanando/lastfm_scrobbler/logger"
+	"gopkg.in/yaml.v2"
 )
 
+type config struct {
+	ServerURL        string `yaml:"server url"`
+	PlexToken        string `yaml:"plex token"`
+	LastFMUser       string `yaml:"lastfm user"`
+	PlexMusicLibrary string `yaml:"plex music library"`
+	Verbose          bool   `yaml:"verbose"`
+}
+
 func main() {
-	var serverURL string
-	var plexToken string
-	// var plexUser string
-	var lastFMUser string
-	var plexMusicLibrary string
-	var verbose bool
-	flag.StringVar(&serverURL, "s", "http://localhost:32400", "Plex server url")
-	flag.StringVar(&plexToken, "t", "", "Plex token")
-	// flag.StringVar(&plexUser, "pu", "", "Plex user to scrobble from, scrobbles from all users by default")
-	flag.StringVar(&lastFMUser, "lu", "", "LastFM user to scrobble from, not required if only 1 user is logged in")
-	flag.StringVar(&plexMusicLibrary, "m", "Music", "Title of the plex music library")
-	flag.BoolVar(&verbose, "v", false, "enable verbose logging")
+	c := config{}
+	var configPath string
+
+	flag.StringVar(&c.ServerURL, "s", "http://localhost:32400", "Plex server url")
+	flag.StringVar(&c.PlexToken, "t", "", "Plex token")
+	flag.StringVar(&c.LastFMUser, "lu", "", "LastFM user to scrobble from, not required if only 1 user is logged in")
+	flag.StringVar(&c.PlexMusicLibrary, "m", "Music", "Title of the plex music library")
+
+	flag.StringVar(&configPath, "c", "", "Path to config file")
+
+	flag.BoolVar(&c.Verbose, "v", false, "enable verbose logging")
 
 	flag.Parse()
 
-	logger.Debug = verbose
+	if configPath != "" {
+		configBytes, err := os.ReadFile(configPath)
 
-	if plexToken == "" {
+		if err != nil {
+			log.Fatalf("Error reading config file: %s\n", err)
+		}
+
+		err = yaml.Unmarshal(configBytes, &c)
+
+		if err != nil {
+			log.Fatalf("Error parsing config file: %s\n", err)
+		}
+	}
+
+	logger.Debug = c.Verbose
+
+	if c.PlexToken == "" {
 		log.Fatalln("Please supply a plex token")
 	}
 
-	lastFM, err := lastfm.FromSessionFile(lastFMUser)
+	lastFM, err := lastfm.FromSessionFile(c.LastFMUser)
 
 	if err != nil {
 		log.Fatalf("Error logging in to lastfm: %s\n", err)
@@ -43,7 +65,7 @@ func main() {
 
 	logger.LogInfo("Logged in!")
 
-	plexConn, err := plex.New(serverURL, plexToken)
+	plexConn, err := plex.New(c.ServerURL, c.PlexToken)
 
 	if err != nil {
 		log.Fatalf("Error connecting to plex server: %s\n", err)
@@ -54,7 +76,6 @@ func main() {
 	events := plex.NewNotificationEvents()
 
 	var lastScrobbled string
-	var nowPlaying string
 	var started time.Time = time.Now()
 	var cachedScrobble *lastfm.Scrobble
 
@@ -68,7 +89,7 @@ func main() {
 
 		m := metadata.MediaContainer.Metadata[0]
 
-		if m.LibrarySectionTitle != plexMusicLibrary ||
+		if m.LibrarySectionTitle != c.PlexMusicLibrary ||
 			n.PlaySessionStateNotification[0].State != "playing" || n.Type != "playing" {
 			return
 		}
@@ -115,19 +136,18 @@ func main() {
 			logger.LogDebug("Added %s - %s to scrobble cache, will be scrobbled once next track starts playing", scrobble.Track, scrobble.Album)
 		}
 
-		if nowPlaying != n.PlaySessionStateNotification[0].RatingKey {
-			err = lastFM.NowPlaying(scrobble)
+		err = lastFM.NowPlaying(scrobble)
 
-			if err != nil {
-				logger.LogError("error setting nowplaying on track: %s", err)
-			}
-			nowPlaying = n.PlaySessionStateNotification[0].RatingKey
-
-			logger.LogInfo("%s is now playing %s - %s", lastFM.Username, scrobble.Track, scrobble.Album)
+		if err != nil {
+			logger.LogError("error setting nowplaying on track: %s", err)
 		}
+
+		logger.LogInfo("%s is now playing %s - %s", lastFM.Username, scrobble.Track, scrobble.Artist)
 	})
 
-	plexConn.SubscribeToNotifications(events, exit, func(err error) {})
+	plexConn.SubscribeToNotifications(events, exit, func(err error) {
+		logger.LogDebug("%v", err)
+	})
 
 	select {}
 }
