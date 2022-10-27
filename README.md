@@ -6,6 +6,7 @@
 Pass the ``-h`` flag to view all possible command line arguments.
 ### You can optionally provide a config file
 ```lastfm_scrobbler -c ./config.yaml```
+
 The following variables can be defined in your config file:
 ```yaml
 server url: http://localhost:32400
