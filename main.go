@@ -71,8 +71,6 @@ func main() {
 		log.Fatalf("Error connecting to plex server: %s\n", err)
 	}
 
-	exit := make(chan os.Signal, 1)
-
 	events := plex.NewNotificationEvents()
 
 	var lastScrobbled string
@@ -117,8 +115,8 @@ func main() {
 
 		scrobble := &lastfm.Scrobble{
 			Album:      m.ParentTitle,
-			Artist:     m.GrandparentTitle,
-			Track:      strings.ReplaceAll(m.Title, "’", "'"), // replace all ’ with ' to prevent scrobbling the wrong track
+			Artist:     normalizeString(m.GrandparentTitle), // Normalize string to prevent scrobbling the wrong track/artist
+			Track:      normalizeString(m.Title),            // Normalize string to prevent scrobbling the wrong track/artist
 			Duration:   durationSeconds,
 			TrackIndex: int(m.Index),
 			StartTime:  started,
@@ -145,9 +143,38 @@ func main() {
 		logger.LogInfo("%s is now playing %s - %s", lastFM.Username, scrobble.Track, scrobble.Artist)
 	})
 
-	plexConn.SubscribeToNotifications(events, exit, func(err error) {
-		logger.LogDebug("%v", err)
-	})
+	for {
+		subscribe(plexConn, events)
+		// subscribetonotifictions encountered an error, try to reinitialize a plexconn and then resubscribe
+		logger.LogError("Connection to plex server lost, trying to reconnect in 5 seconds")
+		for {
+			time.Sleep(time.Second * 5)
+			plexConn, err = plex.New(c.ServerURL, c.PlexToken)
 
-	select {}
+			if err != nil {
+				logger.LogError("Error re-establishing connection to Plex Server: %v", err)
+				continue
+			}
+			break
+		}
+	}
+}
+
+func normalizeString(input string) string {
+	input = strings.ReplaceAll(input, "’", "'")
+	input = strings.ReplaceAll(input, "‐", "-")
+	return input
+}
+
+func subscribe(plexConn *plex.Plex, events *plex.NotificationEvents) {
+	exit := make(chan os.Signal, 1)
+	wait := make(chan struct{}, 1)
+	plexConn.SubscribeToNotifications(events, exit, func(err error) {
+		logger.LogDebug("subcribeToNotifications: %v", err)
+
+		logger.LogDebug("got error, trying to re-establish connection")
+		exit <- os.Kill
+		wait <- struct{}{}
+	})
+	<-wait
 }
